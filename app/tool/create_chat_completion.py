@@ -30,7 +30,14 @@ class CreateChatCompletion(BaseTool):
         self.parameters = self._build_parameters()
 
     def _build_parameters(self) -> dict:
-        """Build parameters schema based on response type."""
+        """Build parameters schema based on response type.
+
+        Handles:
+        - Primitive types (str, int, etc)
+        - Pydantic models
+        - Union/Optional types
+        - List/Dict generic types
+        """
         if self.response_type == str:
             return {
                 "type": "object",
@@ -57,8 +64,36 @@ class CreateChatCompletion(BaseTool):
 
     def _create_type_schema(self, type_hint: Type) -> dict:
         """Create a JSON schema for the given type."""
-        origin = get_origin(type_hint)
+        origin = get_origin(type_hint) or type_hint
         args = get_args(type_hint)
+
+        # Handle Union/Optional types
+        # 增强Union类型处理
+        if origin is Union:
+        # 处理Optional类型（Union[T, None]）的特殊情况
+        if len(args) == 2 and type(None) in args:
+        non_none_type = next(t for t in args if t is not type(None))
+        base_schema = self._create_type_schema(non_none_type)
+        base_schema['properties']['response']['type'].append('null')
+        return base_schema
+        
+        # 处理普通Union类型
+        return {
+        "type": "object",
+        "properties": {
+        "response": {
+        "anyOf": [
+        self._create_type_schema(t)['properties']['response'] 
+        for t in args
+        ]
+        }
+        },
+        "required": self.required,
+        }
+        
+        # 增加对嵌套Union类型的递归处理
+        if isinstance(type_hint, (Union, list, dict)):
+        return self._create_type_schema(get_origin(type_hint) or type_hint)
 
         # Handle primitive types
         if origin is None:
